@@ -7,3 +7,6 @@
 [submodule "source/MaterialXGraphEditor/External/ImGuiNodeEditor"]
 	path = source/MaterialXGraphEditor/External/ImGuiNodeEditor
 	url = https://github.com/thedmd/imgui-node-editor
+[submodule "source/MaterialXRender/External/tinyusdz"]
+	path = source/MaterialXRender/External/tinyusdz
+	url = https://github.com/syoyo/tinyusdz
