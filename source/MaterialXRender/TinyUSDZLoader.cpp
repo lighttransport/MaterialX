@@ -15,10 +15,11 @@
     #pragma warning(disable : 4996)
 #endif
 
-#include <MaterialXRender/External/tinyusdz/src/tinyusdz.hh>
-#include <MaterialXRender/External/tinyusdz/src/pprinter.hh>
-#include <MaterialXRender/External/tinyusdz/src/value-pprint.hh>
-#include <MaterialXRender/External/tinyusdz/src/tydra/render-data.hh>
+// <MaterialX>/third_party/tinyusdz
+#include <tinyusdz/src/tinyusdz.hh>
+#include <tinyusdz/src/pprinter.hh>
+#include <tinyusdz/src/value-pprint.hh>
+#include <tinyusdz/src/tydra/render-data.hh>
 
 #if defined(_MSC_VER)
     #pragma warning(pop)

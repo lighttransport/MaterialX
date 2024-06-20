@@ -387,6 +387,10 @@ if (MATERIALX_BUILD_MONOLITHIC)
     add_subdirectory(source)
 endif()
 
+# tinyusdz
+add_subdirectory(third_party/tinyusdz tinyusdz)
+list(APPEND ${EXTERNAL_INCLUDE_DIRS} "third_party")
+
 # Add core subdirectories
 add_subdirectory(source/MaterialXCore)
 add_subdirectory(source/MaterialXFormat)
