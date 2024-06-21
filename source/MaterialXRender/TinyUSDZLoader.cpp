@@ -103,6 +103,317 @@ void decodeVec4Tangents(MeshStreamPtr vec4TangentStream, MeshStreamPtr normalStr
 }
 #endif
 
+bool setupMeshNode(const tinyusdz::tydra::RenderScene &rscene, const tinyusdz::tydra::Node &node, MeshList &meshList, int debugLevel)
+{
+	// tinyusdz::value::matrix4d uses the same memory layout of OpenGL.
+	tinyusdz::value::matrix4d global_matrix = node.global_matrix;
+	tinyusdz::value::matrix4d normal_matrix = tinyusdz::transpose(tinyusdz::inverse(global_matrix));
+
+	Matrix44 positionMatrix;
+	{
+		const double *t = &global_matrix.m[0][0];
+		positionMatrix = Matrix44(
+		(float) t[0], (float) t[1], (float) t[2], (float) t[3],
+		(float) t[4], (float) t[5], (float) t[6], (float) t[7],
+		(float) t[8], (float) t[9], (float) t[10], (float) t[11],
+		(float) t[12], (float) t[13], (float) t[14], (float) t[15]);
+	}
+
+	// TODO: GeomSubset
+
+	Vector3 boxMin = { MAX_FLOAT, MAX_FLOAT, MAX_FLOAT };
+	Vector3 boxMax = { -MAX_FLOAT, -MAX_FLOAT, -MAX_FLOAT };
+
+
+	string meshName = node.abs_path;
+    MeshPtr mesh = Mesh::create(meshName);
+	if (debugLevel > 0)
+	{
+		std::cout << "Translate mesh: " << meshName << std::endl;
+	}
+    meshList.push_back(mesh);
+    //mesh->setSourceUri(filePath);
+
+    MeshStreamPtr positionStream = nullptr;
+    MeshStreamPtr normalStream = nullptr;
+    MeshStreamPtr colorStream = nullptr;
+    MeshStreamPtr texcoordStream = nullptr;
+    MeshStreamPtr vec4TangentStream = nullptr;
+    int colorAttrIndex = 0;
+
+	const tinyusdz::tydra::RenderMesh &rmesh = rscene.meshes[node.id];
+
+    // Read in vertex streams
+    // Position
+    {
+		size_t streamIndex = 0;
+		{
+            positionStream = MeshStream::create("i_" + MeshStream::POSITION_ATTRIBUTE, MeshStream::POSITION_ATTRIBUTE, streamIndex);
+            mesh->addStream(positionStream);
+
+            MeshFloatBuffer& buffer = positionStream->getData();
+            positionStream->reserve(rmesh.points.size());
+
+			for (size_t i = 0; i < rmesh.points.size(); i++) {
+				Vector3 position;
+				position[0] = rmesh.points[i][0];
+				position[1] = rmesh.points[i][1];
+				position[2] = rmesh.points[i][2];
+
+				position = positionMatrix.transformPoint(position);
+
+				buffer.push_back(position[0]);
+				buffer.push_back(position[1]);
+				buffer.push_back(position[2]);
+
+				boxMin[0] = std::min(position[0], boxMin[0]);
+				boxMin[1] = std::min(position[1], boxMin[1]);
+				boxMin[2] = std::min(position[2], boxMin[2]);
+
+				boxMax[0] = std::max(position[0], boxMax[0]);
+				boxMax[1] = std::max(position[1], boxMax[1]);
+				boxMax[2] = std::max(position[2], boxMax[2]);
+			}
+
+		}
+
+        // Get data as floats
+        MeshStreamPtr geomStream = nullptr;
+
+        bool isPositionStream = (attribute->type == cgltf_attribute_type_position);
+        bool isNormalStream = (attribute->type == cgltf_attribute_type_normal);
+        bool isTangentStream = (attribute->type == cgltf_attribute_type_tangent);
+        bool isColorStream = (attribute->type == cgltf_attribute_type_color);
+        bool isTexCoordStream = (attribute->type == cgltf_attribute_type_texcoord);
+
+        if (isPositionStream)
+        {
+            // Create position stream
+        }
+        else if (isNormalStream)
+        {
+            normalStream = MeshStream::create("i_" + MeshStream::NORMAL_ATTRIBUTE, MeshStream::NORMAL_ATTRIBUTE, streamIndex);
+            mesh->addStream(normalStream);
+            geomStream = normalStream;
+        }
+        else if (isTangentStream)
+        {
+            vec4TangentStream = MeshStream::create("i_" + MeshStream::TANGENT_ATTRIBUTE + "4", MeshStream::TANGENT_ATTRIBUTE, streamIndex);
+            vec4TangentStream->setStride(MeshStream::STRIDE_4D); // glTF stores the bitangent sign in the 4th component
+            geomStream = vec4TangentStream;
+            desiredVectorSize = 4;
+        }
+        else if (isColorStream)
+        {
+            colorStream = MeshStream::create("i_" + MeshStream::COLOR_ATTRIBUTE + "_" + std::to_string(colorAttrIndex), MeshStream::COLOR_ATTRIBUTE, streamIndex);
+            mesh->addStream(colorStream);
+            geomStream = colorStream;
+            if (vectorSize == 4)
+            {
+                colorStream->setStride(MeshStream::STRIDE_4D);
+                desiredVectorSize = 4;
+            }
+            colorAttrIndex++;
+        }
+        else if (isTexCoordStream)
+        {
+            texcoordStream = MeshStream::create("i_" + MeshStream::TEXCOORD_ATTRIBUTE + "_0", MeshStream::TEXCOORD_ATTRIBUTE, 0);
+            mesh->addStream(texcoordStream);
+            if (vectorSize == 2)
+            {
+                texcoordStream->setStride(MeshStream::STRIDE_2D);
+                desiredVectorSize = 2;
+            }
+            geomStream = texcoordStream;
+        }
+        else
+        {
+            if (_debugLevel > 0)
+                std::cout << "Unknown stream type: " << std::to_string(attribute->type) << std::endl;
+        }
+
+        // Fill in stream
+        if (geomStream)
+        {
+            MeshFloatBuffer& buffer = geomStream->getData();
+            cgltf_size vertexCount = accessor->count;
+            geomStream->reserve(vertexCount);
+
+            if (_debugLevel > 0)
+            {
+                std::cout << "** Read stream: " << geomStream->getName() << std::endl;
+                std::cout << " - vertex count: " << std::to_string(vertexCount) << std::endl;
+                std::cout << " - vector size: " << std::to_string(vectorSize) << std::endl;
+            }
+
+            for (cgltf_size i = 0; i < vertexCount; i++)
+            {
+                const float* input = &attributeData[vectorSize * i];
+                if (isPositionStream)
+                {
+                    Vector3 position;
+                    for (cgltf_size v = 0; v < desiredVectorSize; v++)
+                    {
+                        // Update bounding box
+                        float floatValue = (v < vectorSize) ? input[v] : 0.0f;
+                        position[v] = floatValue;
+                    }
+                    position = positionMatrix.transformPoint(position);
+                    for (cgltf_size v = 0; v < desiredVectorSize; v++)
+                    {
+                        buffer.push_back(position[v]);
+                        boxMin[v] = std::min(position[v], boxMin[v]);
+                        boxMax[v] = std::max(position[v], boxMax[v]);
+                    }
+                }
+                else if (isNormalStream)
+                {
+                    Vector3 normal;
+                    for (cgltf_size v = 0; v < desiredVectorSize; v++)
+                    {
+                        float floatValue = (v < vectorSize) ? input[v] : 0.0f;
+                        normal[v] = floatValue;
+                    }
+                    normal = normalMatrix.transformVector(normal).getNormalized();
+                    for (cgltf_size v = 0; v < desiredVectorSize; v++)
+                    {
+                        buffer.push_back(normal[v]);
+                    }
+                }
+                else
+                {
+                    for (cgltf_size v = 0; v < desiredVectorSize; v++)
+                    {
+                        float floatValue = (v < vectorSize) ? input[v] : 0.0f;
+                        // Perform v-flip
+                        if (isTexCoordStream && v == 1)
+                        {
+                            if (!texcoordVerticalFlip)
+                            {
+                                floatValue = 1.0f - floatValue;
+                            }
+                        }
+                        buffer.push_back(floatValue);
+                    }
+                }
+            }
+        }
+    }
+
+    if (!positionStream)
+    {
+        continue;
+    }
+
+    // Read indexing
+    MeshPartitionPtr part = MeshPartition::create();
+    size_t indexCount = 0;
+    cgltf_accessor* indexAccessor = primitive->indices;
+    if (indexAccessor)
+    {
+        indexCount = indexAccessor->count;
+    }
+    else
+    {
+        indexCount = positionStream->getData().size();
+    }
+    size_t faceCount = indexCount / FACE_VERTEX_COUNT;
+    part->setFaceCount(faceCount);
+    part->setName(meshName);
+
+    MeshIndexBuffer& indices = part->getIndices();
+    if (_debugLevel > 0)
+    {
+        std::cout << "** Read indexing: Count = " << std::to_string(indexCount) << std::endl;
+    }
+    if (indexAccessor)
+    {
+        for (cgltf_size i = 0; i < indexCount; i++)
+        {
+            uint32_t vertexIndex = static_cast<uint32_t>(cgltf_accessor_read_index(indexAccessor, i));
+            indices.push_back(vertexIndex);
+        }
+    }
+    else
+    {
+        for (cgltf_size i = 0; i < indexCount; i++)
+        {
+            indices.push_back(static_cast<uint32_t>(i));
+        }
+    }
+    mesh->addPartition(part);
+
+    // Update positional information.
+    mesh->setVertexCount(positionStream->getData().size() / MeshStream::STRIDE_3D);
+    mesh->setMinimumBounds(boxMin);
+    mesh->setMaximumBounds(boxMax);
+    Vector3 sphereCenter = (boxMax + boxMin) * 0.5;
+    mesh->setSphereCenter(sphereCenter);
+    mesh->setSphereRadius((sphereCenter - boxMin).getMagnitude());
+
+    if (vec4TangentStream && normalStream)
+    {
+        // Decode tangents primvar to MaterialX vec3 tangents and bitangents
+        MeshStreamPtr tangentStream;
+        MeshStreamPtr bitangentStream;
+        //decodeVec4Tangents(vec4TangentStream, normalStream, tangentStream, bitangentStream);
+
+        if (tangentStream)
+        {
+            mesh->addStream(tangentStream);
+        }
+        if (bitangentStream)
+        {
+            mesh->addStream(bitangentStream);
+        }
+    }
+
+    // Generate tangents, normals and texture coordinates if none are provided
+    if (!normalStream)
+    {
+        normalStream = mesh->generateNormals(positionStream);
+        mesh->addStream(normalStream);
+    }
+    if (!texcoordStream)
+    {
+        texcoordStream = mesh->generateTextureCoordinates(positionStream);
+        mesh->addStream(texcoordStream);
+    }
+    if (!vec4TangentStream)
+    {
+        MeshStreamPtr tangentStream = mesh->generateTangents(positionStream, normalStream, texcoordStream);
+        if (tangentStream)
+        {
+            mesh->addStream(tangentStream);
+        }
+        MeshStreamPtr bitangentStream = mesh->generateBitangents(normalStream, tangentStream);
+        if (bitangentStream)
+        {
+            mesh->addStream(bitangentStream);
+        }
+    }
+            }
+	
+
+    //meshMatrices[cmesh].push_back(positionMatrix);
+	// TODO
+	return true;
+}
+
+bool traverseNodeRecursive(const tinyusdz::tydra::Node &node)
+{
+	if (!setupMeshNode(node)) {
+	}
+
+	for (const auto &child : node.children()) {
+		if (!traverseNodeRecursive(child)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 } // anonymous namespace
 
 bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool texcoordVerticalFlip)
@@ -205,8 +516,12 @@ bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool tex
 
     // Read in all meshes
     StringSet meshNames;
-    for (size_t m = 0; m < data->meshes_count; m++)
+	const tinyusdz::tydra::Node &root_node = render_scene.nodes[render_scene.default_root_node];
+    for (size_t n = 0; n < render_scene.nodes.size(); n++)
     {
+		tinyusdz::tydra::Node &node = render_scene.nodes[n];
+		if (node.
+
         cgltf_mesh* cmesh = &(data->meshes[m]);
         if (!cmesh)
         {
