@@ -15,11 +15,12 @@
     #pragma warning(disable : 4996)
 #endif
 
-// <MaterialX>/third_party/tinyusdz
-#include <tinyusdz/src/tinyusdz.hh>
-#include <tinyusdz/src/pprinter.hh>
-#include <tinyusdz/src/value-pprint.hh>
-#include <tinyusdz/src/tydra/render-data.hh>
+// <MaterialX>/third_party/tinyusdz/src
+#include <tinyusdz.hh>
+#include <io-util.hh>
+#include <pprinter.hh>
+#include <value-pprint.hh>
+#include <tydra/render-data.hh>
 
 #if defined(_MSC_VER)
     #pragma warning(pop)
@@ -42,10 +43,11 @@ const float MAX_FLOAT = std::numeric_limits<float>::max();
 const size_t FACE_VERTEX_COUNT = 3;
 
 // List of transforms which match to meshes
-using USDMeshMatrixList = std::unordered_map<cgltf_mesh*, std::vector<Matrix44>>;
+using USDMeshMatrixList = std::unordered_map<tinyusdz::tydra::RenderMesh*, std::vector<Matrix44>>;
 
+#if 0
 // Compute matrices for each mesh. Appends a transform for each transform instance
-void computeMeshMatrices(USDMeshMatrixList& meshMatrices, cgltf_node* cnode)
+void computeMeshMatrices(USDMeshMatrixList& meshMatrices, tinyusdz::tydra::Node* cnode)
 {
     cgltf_mesh* cmesh = cnode->mesh;
     if (cmesh)
@@ -68,40 +70,12 @@ void computeMeshMatrices(USDMeshMatrixList& meshMatrices, cgltf_node* cnode)
         computeMeshMatrices(meshMatrices, cnode->children[i]);
     }
 }
-
-const std::string DEFAULT_NODE_PREFIX = "NODE_";
-const std::string DEFAULT_MESH_PREFIX = "MESH_";
+#endif
 
 // List of path names which match to meshes
-using USDMeshPathList = std::unordered_map<cgltf_mesh*, StringVec>;
+using USDMeshPathList = std::unordered_map<tinyusdz::tydra::RenderMesh*, StringVec>;
 
-void computeMeshPaths(USDMeshPathList& meshPaths, cgltf_node* cnode, FilePath path, size_t nodeCount, size_t meshCount)
-{
-    string cnodeName = cnode->name ? string(cnode->name) : DEFAULT_NODE_PREFIX + std::to_string(nodeCount++);
-    path = path / (createValidName(cnodeName) + "/");
-
-    cgltf_mesh* cmesh = cnode->mesh;
-    if (cmesh)
-    {
-        // Set path to mesh if no transform path found
-        if (path.isEmpty())
-        {
-            string meshName = cmesh->name ? string(cmesh->name) : DEFAULT_MESH_PREFIX + std::to_string(meshCount++);
-            path = createValidName(meshName);
-        }
-
-        meshPaths[cmesh].push_back(path.asString(FilePath::FormatPosix));
-    }
-
-    // Iterate over all children. Note that the existence of a mesh
-    // does not imply that this is a leaf node so traversal should
-    // continue even when a mesh is encountered.
-    for (cgltf_size i = 0; i < cnode->children_count; i++)
-    {
-        computeMeshPaths(meshPaths, cnode->children[i], path, nodeCount, meshCount);
-    }
-}
-
+#if 0 // TODO
 void decodeVec4Tangents(MeshStreamPtr vec4TangentStream, MeshStreamPtr normalStream, MeshStreamPtr& tangentStream, MeshStreamPtr& bitangentStream)
 {
     if (vec4TangentStream->getSize() != normalStream->getSize())
@@ -127,35 +101,90 @@ void decodeVec4Tangents(MeshStreamPtr vec4TangentStream, MeshStreamPtr normalStr
         bitangent = normal.cross(tangent) * vec4Tangent[3];
     }
 }
+#endif
 
 } // anonymous namespace
 
 bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool texcoordVerticalFlip)
 {
     const string input_filename = filePath.asString();
-    const string ext = stringToLower(filePath.getExtension());
-    const string BINARY_EXTENSION = "glb";
-    const string ASCII_EXTENSION = "gltf";
-    if (ext != BINARY_EXTENSION && ext != ASCII_EXTENSION)
-    {
+
+    if (!tinyusdz::io::FileExists(input_filename)) {
+        std::cerr << "File not found: " << input_filename << "\n";
+    }
+
+    if (!tinyusdz::IsUSD(input_filename)) {
+        std::cerr << "File is not a USD(USDA/USDC/USDZ) format: " << input_filename << "\n";
+    }
+
+    tinyusdz::Stage stage;
+    std::string warn, err;
+
+    bool result = tinyusdz::LoadUSDFromFile(input_filename, &stage, &warn, &err);
+    if (warn.size()) {
+        std::cout << "WARN: " << warn << "\n";
+        warn.clear();
+    }
+
+    if (!result) {
+        std::cerr << "USD Load ERROR: " << err << "\n";
         return false;
     }
 
-    cgltf_options options;
-    std::memset(&options, 0, sizeof(options));
-    cgltf_data* data = nullptr;
+    // Convert USD Scene(Stage) to OpenGL/Vulkan-friendly scene data using TinyUSDZ Tydra
+    tinyusdz::tydra::RenderScene render_scene;
+    tinyusdz::tydra::RenderSceneConverter converter;
+    tinyusdz::tydra::RenderSceneConverterEnv env(stage);
 
-    // Read file
-    cgltf_result result = cgltf_parse_file(&options, input_filename.c_str(), &data);
-    if (result != cgltf_result_success)
-    {
+    // In default, RenderSceneConverter triangulate meshes and build single vertex ind  ex.
+    // You can explicitly enable triangulation and vertex-indices build by
+    //env.mesh_config.triangulate = true;
+    //env.mesh_config.build_vertex_indices = true;
+
+    // Load textures as stored representaion(e.g. 8bit sRGB texture is read as 8bit sR  GB)
+    env.material_config.linearize_color_space = false;
+    env.material_config.preserve_texel_bitdepth = true;
+
+    std::string usd_basedir = tinyusdz::io::GetBaseDir(input_filename);
+    bool is_usdz = tinyusdz::IsUSDZ(input_filename);
+    tinyusdz::USDZAsset usdz_asset;
+	if (is_usdz) {
+		// Setup AssetResolutionResolver to read a asset(file) from memory.
+		if (!tinyusdz::ReadUSDZAssetInfoFromFile(input_filename, &usdz_asset, &warn, &err )) {
+			std::cerr << "Failed to read USDZ assetInfo from file: " << err << "\n";
+			return false;
+		}
+		if (warn.size()) {
+			std::cout << warn << "\n";
+		}
+
+		tinyusdz::AssetResolutionResolver arr;
+
+		// NOTE: Pointer address of usdz_asset must be valid until the call of RenderSceneConverter::ConvertToRenderScene.
+		if (!tinyusdz::SetupUSDZAssetResolution(arr, &usdz_asset)) {
+			std::cerr << "Failed to setup AssetResolution for USDZ asset\n";
+			return false;
+		};
+
+		env.asset_resolver = arr;
+
+	} else {
+	  env.set_search_paths({usd_basedir});
+	}
+    
+
+    env.timecode = tinyusdz::value::TimeCode::Default();
+    bool ret = converter.ConvertToRenderScene(env, &render_scene);
+    if (!ret) {
+        std::cerr << "Failed to convert USD Stage to RenderScene: \n" << converter.GetError() << "\n";
         return false;
     }
-    if (cgltf_load_buffers(&options, data, input_filename.c_str()) != cgltf_result_success)
-    {
-        return false;
+
+    if (converter.GetWarning().size()) {
+        std::cout << "ConvertToRenderScene warn: " << converter.GetWarning() << "\n";
     }
 
+#if 0
     // Precompute mesh / matrix associations starting from the root
     // of the scene.
     USDMeshMatrixList gltfMeshMatrixList;
@@ -172,24 +201,7 @@ bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool tex
             computeMeshMatrices(gltfMeshMatrixList, cnode);
         }
     }
-
-    USDMeshPathList gltfMeshPathList;
-    unsigned int nodeCount = 0;
-    unsigned int meshCount = 0;
-    FilePath path;
-    for (cgltf_size sceneIndex = 0; sceneIndex < data->scenes_count; ++sceneIndex)
-    {
-        cgltf_scene* scene = &data->scenes[sceneIndex];
-        for (cgltf_size nodeIndex = 0; nodeIndex < scene->nodes_count; ++nodeIndex)
-        {
-            cgltf_node* cnode = scene->nodes[nodeIndex];
-            if (!cnode)
-            {
-                continue;
-            }
-            computeMeshPaths(gltfMeshPathList, cnode, path, nodeCount, meshCount);
-        }
-    }
+#endif
 
     // Read in all meshes
     StringSet meshNames;
@@ -471,13 +483,12 @@ bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool tex
                 mesh->setSphereCenter(sphereCenter);
                 mesh->setSphereRadius((sphereCenter - boxMin).getMagnitude());
 
-                // According to glTF spec. 3.7.2.1, tangents must be ignored when normals are missing
                 if (vec4TangentStream && normalStream)
                 {
-                    // Decode glTF vec4 tangents to MaterialX vec3 tangents and bitangents
+                    // Decode tangents primvar to MaterialX vec3 tangents and bitangents
                     MeshStreamPtr tangentStream;
                     MeshStreamPtr bitangentStream;
-                    decodeVec4Tangents(vec4TangentStream, normalStream, tangentStream, bitangentStream);
+                    //decodeVec4Tangents(vec4TangentStream, normalStream, tangentStream, bitangentStream);
 
                     if (tangentStream)
                     {
@@ -516,8 +527,6 @@ bool TinyUSDZLoader::load(const FilePath& filePath, MeshList& meshList, bool tex
             }
         }
     }
-
-    cgltf_free(data);
 
     return true;
 }

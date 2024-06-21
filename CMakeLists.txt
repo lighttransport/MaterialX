@@ -351,6 +351,10 @@ function(mx_add_library MATERIALX_MODULE_NAME)
 
     target_compile_definitions(${TARGET_NAME} PRIVATE "-D${args_EXPORT_DEFINE}")
 
+    # tinyusdz
+    target_include_directories(${TARGET_NAME} PRIVATE
+      ${MATERIALX_TINYUSDZ_INCLUDE_DIR})
+
     if(NOT SKBUILD)
         if(NOT MATERIALX_BUILD_MONOLITHIC)
             install(TARGETS ${MATERIALX_MODULE_NAME}
@@ -389,7 +393,7 @@ endif()
 
 # tinyusdz
 add_subdirectory(third_party/tinyusdz tinyusdz)
-list(APPEND ${EXTERNAL_INCLUDE_DIRS} "third_party")
+set(MATERIALX_TINYUSDZ_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/tinyusdz/src)
 
 # Add core subdirectories
 add_subdirectory(source/MaterialXCore)
