@@ -22,6 +22,7 @@
 #include <MaterialXRender/OiioImageLoader.h>
 #include <MaterialXRender/StbImageLoader.h>
 #include <MaterialXRender/TinyObjLoader.h>
+#include <MaterialXRender/TinyUSDZLoader.h>
 
 #include <MaterialXGenShader/DefaultColorManagementSystem.h>
 #include <MaterialXGenShader/ShaderTranslator.h>
@@ -350,9 +351,11 @@ void Viewer::initialize()
     // Create geometry handler.
     mx::TinyObjLoaderPtr objLoader = mx::TinyObjLoader::create();
     mx::CgltfLoaderPtr gltfLoader = mx::CgltfLoader::create();
+    mx::TinyUSDZLoaderPtr usdzLoader = mx::TinyUSDZLoader::create();
     _geometryHandler = mx::GeometryHandler::create();
     _geometryHandler->addLoader(objLoader);
     _geometryHandler->addLoader(gltfLoader);
+    _geometryHandler->addLoader(usdzLoader);
     loadMesh(_searchPath.find(_meshFilename));
 
     _renderPipeline->initFramebuffer(width(), height(), nullptr);
@@ -568,7 +571,11 @@ void Viewer::createLoadMeshInterface(Widget* parent, const std::string& label)
         {
             { "obj", "Wavefront OBJ" },
             { "gltf", "GLTF ASCII" },
-            { "glb", "GLTF Binary"}
+            { "glb", "GLTF Binary"},
+            { "usd", "USD"},
+            { "usdz", "USDZ"},
+            { "usda", "USDA"},
+            { "usdc", "USDC"},
         }, false);
         if (!filename.empty())
         {

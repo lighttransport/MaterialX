@@ -14,6 +14,7 @@ mx_add_library(MaterialXRender
         ${materialx_headers}
     LIBRARIES
         MaterialXGenShader
+        tinyusdz::tinyusdz_static
     EXPORT_DEFINE
         MATERIALX_RENDER_EXPORTS
 )

@@ -97,6 +97,8 @@ file(GLOB materialx_headers      "${CMAKE_CURRENT_SOURCE_DIR}/*.h*")
 add_definitions(${NANOGUI_EXTRA_DEFS})
 add_definitions(${MATERIALXVIEW_RENDER_BACKEND_DEFINITIONS})
 
+set(TINYUSDZ_LIBRARIES tinyusdz::tinyusdz_static)
+
 set(MATERIALX_LIBRARIES
     MaterialXFormat
     MaterialXGenGlsl
@@ -132,6 +134,7 @@ add_executable(MaterialXView ${materialx_source} ${materialx_headers})
 target_link_libraries(
     MaterialXView
     ${MATERIALX_LIBRARIES}
+    ${TINYUSDZ_LIBRARIES}
     ${NANOGUI_LIBRARIES}
     ${NANOGUI_EXTRA_LIBS})
 
