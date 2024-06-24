@@ -105,6 +105,15 @@ void decodeVec4Tangents(MeshStreamPtr vec4TangentStream, MeshStreamPtr normalStr
 
 bool setupMeshNode(const tinyusdz::tydra::RenderScene &rscene, const tinyusdz::tydra::Node &node, MeshList &meshList, bool texcoordVerticalFlip, int debugLevel)
 {
+  // Skip non-mesh node
+  if (node.nodeType != tinyusdz::tydra::NodeType::Mesh) {
+    return true;
+  }
+
+  if (node.id < 0) {
+    return true;
+  }
+
 	// tinyusdz::value::matrix4d uses the same memory layout of OpenGL.
 	tinyusdz::value::matrix4d globalMatrix = node.global_matrix;
 	//tinyusdz::value::matrix4d normalMatrix = tinyusdz::transpose(tinyusdz::inverse(globalMatrix));

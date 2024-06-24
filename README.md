@@ -1,3 +1,9 @@
+### MaterialX with TinyUSDZ fork
+
+Adding USD loading feature through TinyUSDZ.
+NOTE: Currently the project must be built with `MATERIALX_BUILD_MONOLITHIC=On` in cmake argument.
+(See `vcsetup.bat` for Visual Studio 2022 setup example)
+
 <p align="center">
   <img src="documents/Images/MaterialXLogo.png" height="170" />
 </p>
@@ -6,6 +12,7 @@
 [![Version](https://img.shields.io/github/v/release/AcademySoftwareFoundation/MaterialX)](https://github.com/AcademySoftwareFoundation/MaterialX/releases/latest)
 [![Build Status](https://github.com/AcademySoftwareFoundation/MaterialX/workflows/main/badge.svg?branch=main)](https://github.com/AcademySoftwareFoundation/MaterialX/actions?query=branch%3Amain)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/6025/badge)](https://bestpractices.coreinfrastructure.org/projects/6025)
+
 
 ### Introduction
 
